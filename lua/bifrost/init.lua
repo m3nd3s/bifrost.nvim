@@ -10,10 +10,8 @@ end
 
 local function parse_remote(remote)
   if not remote or remote == "" then return nil, nil end
-  -- Trata formato SSH (git@github.com:user/repo.git)
   local host, repo = remote:match("git@([^:]+):(.+)%.git$")
   if not host then
-    -- Trata formato HTTPS (https://github.com/user/repo.git)
     host, repo = remote:match("https?://([^/]+)/(.+)%.git$")
   end
   return host, repo
@@ -33,12 +31,16 @@ local function build_url(host, repo, branch, rel_path, line)
     return line and (url .. "#lines-" .. line) or url
   end
 
-  -- Fallback genérico
   local url = string.format("%s/blob/%s/%s", base, branch, rel_path)
   return line and (url .. "#L" .. line) or url
 end
 
-function M.launch(with_line)
+--- Função principal
+---@param with_line boolean Se true, inclui a linha atual na URL
+---@param open_browser boolean|nil Se true (padrão), abre o link no navegador
+function M.launch(with_line, open_browser)
+  if open_browser == nil then open_browser = true end
+
   local file = vim.api.nvim_buf_get_name(0)
   if file == "" then
     vim.notify("Bifrost: Nenhum arquivo válido aberto.", vim.log.levels.WARN)
@@ -60,24 +62,31 @@ function M.launch(with_line)
     return
   end
 
-  -- Calcula o caminho relativo do arquivo em relação à raiz do git
   local rel_path = file:sub(#git_root + 2):gsub("\\", "/")
   local line = with_line and vim.api.nvim_win_get_cursor(0)[1] or nil
   local target_url = build_url(host, repo, branch, rel_path, line)
 
-  -- Copia para a área de transferência do sistema (registro +)
+  -- Sempre copia para a área de transferência (+)
   vim.fn.setreg("+", target_url)
 
-  -- Abre o navegador usando a API nativa do NeoVim
-  if vim.ui.open then
-    vim.ui.open(target_url)
+  -- Abre no navegador apenas se solicitado
+  if open_browser then
+    if vim.ui.open then
+      vim.ui.open(target_url)
+    else
+      local open_cmd = vim.fn.has("mac") == 1 and "open" or (vim.fn.has("win32") == 1 and "start" or "xdg-open")
+      vim.fn.jobstart({ open_cmd, target_url }, { detach = true })
+    end
+    vim.notify("Bifrost: Link copiado e aberto!", vim.log.levels.INFO)
   else
-    -- Fallback para versões mais antigas
-    local open_cmd = vim.fn.has("mac") == 1 and "open" or (vim.fn.has("win32") == 1 and "start" or "xdg-open")
-    vim.fn.jobstart({ open_cmd, target_url }, { detach = true })
+    vim.notify("Bifrost: Link copiado para a área de transferência!", vim.log.levels.INFO)
   end
-
-  vim.notify("Bifrost: Link copiado e aberto!", vim.log.levels.INFO)
 end
+
+-- Aliases para facilitar chamadas na configuração
+function M.open_file() M.launch(false, true) end
+function M.open_line() M.launch(true, true) end
+function M.copy_file() M.launch(false, false) end
+function M.copy_line() M.launch(true, false) end
 
 return M
